@@ -13,14 +13,19 @@
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
-BIN="$WORK/SimCity"
 FILTER="${FILTER:-}"
 trap 'rm -rf "$WORK"' EXIT
 
-g++ -std=c++17 -g -fsanitize=address,undefined \
-    "$REPO"/main.cpp "$REPO"/commercial.cpp "$REPO"/config.cpp "$REPO"/growth.cpp \
-    "$REPO"/industrial.cpp "$REPO"/region.cpp "$REPO"/residential.cpp "$REPO"/goods.cpp \
-    -o "$BIN" 2>"$WORK/build.log" || { cat "$WORK/build.log"; echo "build failed"; exit 2; }
+# SIMCITY_BIN lets a caller supply a prebuilt binary (e.g. an instrumented one for coverage).
+if [ -n "${SIMCITY_BIN:-}" ]; then
+    BIN="$SIMCITY_BIN"
+else
+    BIN="$WORK/SimCity"
+    g++ -std=c++17 -g -fsanitize=address,undefined \
+        "$REPO"/main.cpp "$REPO"/commercial.cpp "$REPO"/config.cpp "$REPO"/growth.cpp \
+        "$REPO"/industrial.cpp "$REPO"/region.cpp "$REPO"/residential.cpp "$REPO"/goods.cpp \
+        -o "$BIN" 2>"$WORK/build.log" || { cat "$WORK/build.log"; echo "build failed"; exit 2; }
+fi
 
 # ---------------------------------------------------------------------------
 # Fixtures. Each runs inside a fresh directory and writes config.txt / region.csv.
