@@ -28,7 +28,7 @@ echo "== Building instrumented CLI binary"
 (
     cd "$OUT/cli" || exit 1
     for m in "${MODULES[@]}"; do
-        g++ $FL -fsanitize=address,undefined -c "$REPO/$m.cpp" -o "$m.o" || exit 1
+        g++ $FL -fsanitize=address,undefined -D_GLIBCXX_SANITIZE_VECTOR -c "$REPO/$m.cpp" -o "$m.o" || exit 1
     done
     g++ $FL -fsanitize=address,undefined ./*.o -o SimCity_cov
 ) || { echo "CLI build failed"; exit 2; }
@@ -40,8 +40,12 @@ echo "== Building instrumented unit-test binary"
         [ "$m" = "main" ] && continue
         g++ $FL -c "$REPO/$m.cpp" -o "$m.o" || exit 1
     done
+    # Every test_*.cpp except the harness entry point (test_main.cpp, compiled below).
+    for t in "$REPO"/tests/test_*.cpp; do
+        [ "$(basename "$t")" = "test_main.cpp" ] && continue
+        g++ $FL -c "$t" -o "tests_$(basename "$t" .cpp).o" || exit 1
+    done
     g++ $FL -c "$REPO/tests/test_main.cpp" -o test_main.o || exit 1
-    g++ $FL -c "$REPO/tests/test_config_region.cpp" -o test_config_region.o || exit 1
     g++ $FL ./*.o -o unit_tests
 ) || { echo "unit-test build failed"; exit 2; }
 

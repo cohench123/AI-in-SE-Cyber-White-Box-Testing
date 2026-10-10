@@ -21,7 +21,10 @@ if [ -n "${SIMCITY_BIN:-}" ]; then
     BIN="$SIMCITY_BIN"
 else
     BIN="$WORK/SimCity"
-    g++ -std=c++17 -g -fsanitize=address,undefined \
+    # -D_GLIBCXX_SANITIZE_VECTOR makes ASan flag reads and writes into the spare
+    # capacity of std::vector. Without it, an out-of-bounds index that lands in
+    # that spare capacity goes unreported (see tests/REVIEW.md, IV-12).
+    g++ -std=c++17 -g -fsanitize=address,undefined -D_GLIBCXX_SANITIZE_VECTOR \
         "$REPO"/main.cpp "$REPO"/commercial.cpp "$REPO"/config.cpp "$REPO"/growth.cpp \
         "$REPO"/industrial.cpp "$REPO"/region.cpp "$REPO"/residential.cpp "$REPO"/goods.cpp \
         -o "$BIN" 2>"$WORK/build.log" || { cat "$WORK/build.log"; echo "build failed"; exit 2; }
@@ -54,6 +57,10 @@ s_secret()        { std_config; printf 'Secret,Ibeta\nR,C\n' > region.csv; }
 # ---------------------------------------------------------------------------
 PASS=0
 FAIL=0
+# POLICY cases are design decisions, not defect checks. They are counted apart
+# from the defect results so a policy gap does not look like a crash.
+POL_PASS=0
+POL_FAIL=0
 
 run_case() {
     local id="$1" cat="$2" desc="$3" expect="$4" setup="$5" input="$6"
@@ -80,7 +87,13 @@ run_case() {
         reason="forbidden content exposed: $FORBID"
     fi
 
-    if [ -z "$reason" ]; then
+    if [ "$cat" = POLICY ]; then
+        if [ -z "$reason" ]; then
+            POL_PASS=$((POL_PASS + 1)); echo "[PASS] $id [$cat] $desc"
+        else
+            POL_FAIL=$((POL_FAIL + 1)); echo "[FAIL] $id [$cat] $desc -- $reason"
+        fi
+    elif [ -z "$reason" ]; then
         PASS=$((PASS + 1)); echo "[PASS] $id [$cat] $desc"
     else
         FAIL=$((FAIL + 1)); echo "[FAIL] $id [$cat] $desc -- $reason"
@@ -126,8 +139,10 @@ run_case IV-17 IV "Search with negative coordinate rejected" \
     "Invalid input" s_std "config.txt\nEasy\n3\n-1 0\n0 0\n10\n"
 run_case IV-18 IV "Search with non-numeric coordinates terminates" \
     "Invalid" s_std "config.txt\nEasy\n3\nx y\n10\n"
-run_case IV-19 IV "Search with valid corner (0,0)-(1,1) accepted" \
-    "Ending Simulation" s_std "config.txt\nEasy\n3\n0 0\n1 1\n10\n"
+# The prompt text has no newline before the first output row, so the expectation
+# matches the row's text ("R R ") anywhere on a line, not at line start.
+run_case IV-19 IV "Search with valid corner (0,0)-(1,1) prints the top row of the block" \
+    "R R $" s_std "config.txt\nEasy\n3\n0 0\n1 1\n10\n"
 run_case IV-20 IV "Oversized (5000 char) config filename rejected" \
     "Invalid filename" s_std "$LONG_NAME\nconfig.txt\nEasy\n10\n"
 run_case IV-21 IV "Refresh Rate 0 rejected or handled (no SIGFPE)" \
@@ -138,6 +153,8 @@ run_case IV-23 IV "Out-of-range Time Limit rejected (no abort)" \
     "Invalid|[Ee]rror" s_time_huge "config.txt\nEasy\n10\n"
 run_case IV-24 IV "Config with CRLF line endings runs to completion" \
     "Ending Simulation|Final timestep" s_crlf_config "config.txt\nEasy\n10\n"
+run_case IV-25 IV "Shell metacharacters in config filename rejected (not executed)" \
+    "Invalid filename" s_std "touch_me;id\nconfig.txt\nEasy\n10\n"
 
 # ---------------------------------------------------------------------------
 # File and upload security (FS)
@@ -156,19 +173,21 @@ run_case FS-06 FS "Large (300x300) region file completes" \
     "Ending Simulation|Final timestep" s_big_region "config.txt\nEasy\n10\n"
 run_case FS-07 FS "Config with 1 MB non-key line completes" \
     "Ending Simulation|Final timestep" s_big_config "config.txt\nEasy\n10\n"
-run_case FS-08 FS "POLICY: region path outside config directory is refused" \
-    "outside|not allowed|[Ii]nvalid" s_traversal "config.txt\nEasy\n10\n"
 
 # ---------------------------------------------------------------------------
 # Data protection (DP)
 # ---------------------------------------------------------------------------
-FORBID='Secret|beta' run_case DP-01 DP "Region cells expose only their first character" \
+FORBID='Secret|beta' run_case DP-01 DP "Region cells display only their first character (format check)" \
     "S I " s_secret "config.txt\nEasy\n10\n"
 FORBID='SECRETPATH' run_case DP-02 DP "Invalid filename error does not echo the entered path" \
     "Invalid filename" s_std "SECRETPATH_123/nope.txt\nconfig.txt\nEasy\n10\n"
 FORBID='AddressSanitizer|/home/|\.cpp:' run_case DP-03 DP "Normal error output reveals no build or source paths" \
     "Invalid menu choice" s_std "config.txt\nEasy\n99\n10\n"
 
+run_case POL-01 POLICY "Region path outside the config directory is refused" \
+    "outside|not allowed|[Ii]nvalid" s_traversal "config.txt\nEasy\n10\n"
+
 echo
-echo "$PASS passed, $FAIL failed"
+echo "$PASS passed, $FAIL failed (defect checks)"
+echo "$POL_PASS passed, $POL_FAIL failed (policy checks, not counted above)"
 exit $((FAIL > 0))

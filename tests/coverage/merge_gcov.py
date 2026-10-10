@@ -126,6 +126,11 @@ def main(argv):
     for d in objdirs:
         parts[d] = collect(repo, d)
 
+    if all(not any(parts[d][k] for k in parts[d]) for d in objdirs):
+        print("error: no gcov data found in any OBJDIR (were the programs run?)",
+              file=sys.stderr)
+        return 1
+
     for d in objdirs:
         print_totals(f"{os.path.basename(d)} only", parts[d])
     union = merge(parts.values())

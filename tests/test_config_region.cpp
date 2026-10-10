@@ -124,12 +124,31 @@ TEST(config_value_on_last_line_without_newline_is_read) {
     CHECK_EQ(c.timeLimit, 12);
 }
 
-TEST(config_characterizes_numeric_prefix_accepted) {
-    // stoi parses the leading digits and ignores the rest.
+XFAIL_TEST(config_rejects_value_with_trailing_text,
+           "BUG: stoi accepts the numeric prefix of '20abc' and ignores the rest") {
     Config c;
     string region;
-    parseConfig("Time Limit:20abc\n", c, region);
-    CHECK_EQ(c.timeLimit, 20);
+    bool threw = false;
+    try {
+        parseConfig("Time Limit:20abc\n", c, region);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
+XFAIL_TEST(config_empty_time_limit_does_not_throw,
+           "BUG: an empty value reaches stoi, which throws and aborts the program") {
+    Config c;
+    string region;
+    bool threw = false;
+    try {
+        parseConfig("Time Limit:\n", c, region);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK(!threw);
+    CHECK_EQ(c.timeLimit, 0);
 }
 
 TEST(config_non_numeric_time_limit_throws) {
@@ -175,13 +194,12 @@ TEST(config_missing_file_leaves_defaults) {
     CHECK(region.empty());
 }
 
-TEST(config_characterizes_crlf_keeps_carriage_return_in_region_name) {
-    // Known gap: only leading spaces are trimmed, so a CRLF file leaves '\r'
-    // on the region name, and the CSV then fails to open.
+XFAIL_TEST(config_crlf_region_name_has_no_carriage_return,
+           "BUG: trailing '\\r' from CRLF lines stays in the region name") {
     Config c;
     string region;
     parseConfig("Region Layout:region1.csv\r\n", c, region);
-    CHECK_EQ(region, string("region1.csv\r"));
+    CHECK_EQ(region, string("region1.csv"));
 }
 
 // ---------------------------------------------------------------------------
@@ -225,14 +243,18 @@ TEST(region_leading_empty_cell_becomes_space) {
     CHECK(g[0][1].first == 'R');
 }
 
-TEST(region_characterizes_trailing_comma_is_dropped) {
-    // getline does not emit a final empty field after a trailing comma,
-    // so "R,C," has two cells, not three.
+XFAIL_TEST(region_trailing_comma_yields_empty_last_cell,
+           "BUG: getline drops the empty field after a trailing comma") {
+    // RFC 4180: "R,C," has three fields, the last one empty.
     TempFile f("tc_tmp_region.csv", "R,C,\n");
     Grid g;
     CoutCapture quiet;
     regionFill("tc_tmp_region.csv", g);
-    CHECK_EQ(g[0].size(), size_t(2));
+    CHECK_EQ(g[0].size(), size_t(3));
+    // Guard the index: with the bug, size is 2 and g[0][2] would be out of bounds.
+    if (!g.empty() && g[0].size() >= 3) {
+        CHECK(g[0][2].first == ' ');
+    }
 }
 
 TEST(region_all_populations_start_at_zero) {
