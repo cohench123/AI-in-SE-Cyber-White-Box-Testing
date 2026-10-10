@@ -15,3 +15,9 @@ $(TARGET): $(OBJS)
 
 clean:
 	del /Q *.o $(TARGET).exe 2>nul
+
+# Measure line/branch/function coverage (see tests/coverage/run_coverage.sh).
+.PHONY: coverage
+
+coverage:
+	tests/coverage/run_coverage.sh
